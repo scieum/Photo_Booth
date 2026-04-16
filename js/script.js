@@ -420,6 +420,20 @@ const pb = {
 
 const PHOTO_COUNT = 4;
 
+// --- 브라우저 감지 ---
+function detectIOSNonSafariBrowser() {
+    const ua = navigator.userAgent;
+    // iPadOS 13+는 UA에서 iPad를 숨기고 Mac처럼 보내기 때문에 touch 포인트로도 판별
+    const isiOS = /iPhone|iPad|iPod/.test(ua) ||
+        (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    if (!isiOS) return null;
+    // iOS Chrome: CriOS, iOS Firefox: FxiOS, iOS Edge: EdgiOS
+    if (/CriOS/.test(ua)) return 'Chrome';
+    if (/FxiOS/.test(ua)) return 'Firefox';
+    if (/EdgiOS/.test(ua)) return 'Edge';
+    return null;
+}
+
 // --- 초기화 ---
 async function initPhotoBooth() {
     pb.video = document.getElementById('cameraVideo');
@@ -427,6 +441,13 @@ async function initPhotoBooth() {
 
     resetPhotoBooth();
     hidePbError();
+
+    // 사전 점검: iOS 비-Safari 브라우저
+    const iosBrowser = detectIOSNonSafariBrowser();
+    if (iosBrowser) {
+        showPbError({ name: 'IOSNonSafariError', browser: iosBrowser });
+        return;
+    }
 
     // 사전 점검: API 존재 여부, 보안 컨텍스트
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
@@ -502,31 +523,38 @@ function updateHint(msg) {
 
 function showPbError(err) {
     const box = document.getElementById('pbError');
+    const title = box.querySelector('h3');
     const msg = document.getElementById('pbErrorMsg');
     const name = err && err.name;
+    let heading = '카메라를 사용할 수 없어요';
     let text;
 
     switch (name) {
+        case 'IOSNonSafariError':
+            heading = 'Safari로 열어주세요';
+            text = `아이패드/아이폰에서는 ${err.browser} 가 카메라 접근을 지원하지 않아요. 같은 주소를 Safari 로 열면 정상 작동합니다. (Apple 정책으로 iOS의 모든 브라우저는 Safari 엔진을 쓰지만, 카메라 API는 Safari 에서만 허용돼요)`;
+            break;
         case 'NotAllowedError':
         case 'SecurityError':
             text = '카메라 권한이 거부됐어요. 주소창 왼쪽 자물쇠/카메라 아이콘을 눌러 "허용"으로 바꾼 뒤 새로고침해 주세요.';
             break;
         case 'NotFoundError':
         case 'OverconstrainedError':
-            text = '연결된 카메라를 찾을 수 없어요. 노트북 카메라가 켜져 있는지, 다른 앱(Zoom·Teams 등)이 카메라를 사용 중이지 않은지 확인해 주세요.';
+            text = '연결된 카메라를 찾을 수 없어요. 카메라가 켜져 있는지, 다른 앱(Zoom·Teams 등)이 카메라를 사용 중이지 않은지 확인해 주세요.';
             break;
         case 'NotReadableError':
             text = '카메라가 다른 프로그램에서 사용 중이에요. Zoom, Teams, OBS 같은 앱을 종료한 뒤 다시 시도해 주세요.';
             break;
         case 'InsecureContextError':
-            text = '카메라는 HTTPS 또는 localhost 에서만 작동해요. 주소창이 http://localhost:... 형식인지 확인해 주세요.';
+            text = '카메라는 HTTPS 또는 localhost 에서만 작동해요. 주소창이 https:// 로 시작하는지 확인해 주세요.';
             break;
         case 'NotSupportedError':
-            text = '이 브라우저는 카메라 API를 지원하지 않아요. 최신 Chrome / Edge / Firefox 를 사용해 주세요.';
+            text = '이 브라우저는 카메라 API를 지원하지 않아요. 최신 Safari / Chrome / Edge / Firefox 를 사용해 주세요.';
             break;
         default:
             text = `카메라를 시작하지 못했어요 (${name || '알 수 없는 오류'}). 다시 시도해 주세요.`;
     }
+    if (title) title.textContent = heading;
     msg.textContent = text;
     box.hidden = false;
 }
