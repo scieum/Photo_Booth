@@ -428,29 +428,61 @@ async function initPhotoBooth() {
     resetPhotoBooth();
     hidePbError();
 
+    // 사전 점검: API 존재 여부, 보안 컨텍스트
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        showPbError({ name: 'NotSupportedError' });
+        return;
+    }
+    if (!window.isSecureContext) {
+        showPbError({ name: 'InsecureContextError' });
+        return;
+    }
+
     try {
-        // 1. 프레임 이미지 로드 + 그린스크린 처리
+        // 1. 웹캠 먼저 시작 — iOS Safari는 사용자 제스처 바로 뒤에 getUserMedia 호출해야 함
+        if (!pb.stream) {
+            pb.stream = await requestCamera();
+        }
+        pb.video.srcObject = pb.stream;
+
+        // iOS Safari는 play()가 반드시 호출돼야 영상이 렌더됨
+        try { await pb.video.play(); } catch (_) { /* autoplay 차단 시 조용히 넘김 */ }
+
+        // 2. 그 다음 프레임 이미지 로드 + 그린스크린 처리
         if (!pb.frameImg) {
             pb.frameImg = await loadImage('image/photo.png');
             pb.frameKeyedCanvas = chromaKeyGreen(pb.frameImg);
         }
-
         renderFrameOverlay();
 
-        // 2. 웹캠 시작
-        if (!pb.stream) {
-            pb.stream = await navigator.mediaDevices.getUserMedia({
-                video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } },
-                audio: false
-            });
-        }
-        pb.video.srcObject = pb.stream;
-        await pb.video.play();
-
     } catch (err) {
-        console.error(err);
+        console.error('[photobooth] camera error:', err);
         showPbError(err);
     }
+}
+
+// 여러 제약 조건을 순차적으로 시도해서 가장 호환되는 카메라 스트림을 획득
+async function requestCamera() {
+    const attempts = [
+        // 1순위: HD 해상도 + 전면 카메라 선호
+        { video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: { ideal: 'user' } }, audio: false },
+        // 2순위: 해상도만
+        { video: { width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false },
+        // 3순위: 가장 단순한 제약 (무조건 카메라 하나)
+        { video: true, audio: false }
+    ];
+
+    let lastErr;
+    for (const constraints of attempts) {
+        try {
+            return await navigator.mediaDevices.getUserMedia(constraints);
+        } catch (err) {
+            lastErr = err;
+            // 권한 거부는 재시도해도 소용없으니 즉시 throw
+            if (err.name === 'NotAllowedError' || err.name === 'SecurityError') throw err;
+        }
+    }
+    throw lastErr;
 }
 
 function resetPhotoBooth() {
@@ -471,13 +503,31 @@ function updateHint(msg) {
 function showPbError(err) {
     const box = document.getElementById('pbError');
     const msg = document.getElementById('pbErrorMsg');
-    if (err && err.name === 'NotAllowedError') {
-        msg.textContent = '브라우저 주소창 옆 자물쇠 아이콘에서 카메라 권한을 허용해주세요.';
-    } else if (err && err.name === 'NotFoundError') {
-        msg.textContent = '연결된 카메라를 찾을 수 없어요.';
-    } else {
-        msg.textContent = '카메라를 시작하는 중 문제가 발생했어요. 다시 시도해주세요.';
+    const name = err && err.name;
+    let text;
+
+    switch (name) {
+        case 'NotAllowedError':
+        case 'SecurityError':
+            text = '카메라 권한이 거부됐어요. 주소창 왼쪽 자물쇠/카메라 아이콘을 눌러 "허용"으로 바꾼 뒤 새로고침해 주세요.';
+            break;
+        case 'NotFoundError':
+        case 'OverconstrainedError':
+            text = '연결된 카메라를 찾을 수 없어요. 노트북 카메라가 켜져 있는지, 다른 앱(Zoom·Teams 등)이 카메라를 사용 중이지 않은지 확인해 주세요.';
+            break;
+        case 'NotReadableError':
+            text = '카메라가 다른 프로그램에서 사용 중이에요. Zoom, Teams, OBS 같은 앱을 종료한 뒤 다시 시도해 주세요.';
+            break;
+        case 'InsecureContextError':
+            text = '카메라는 HTTPS 또는 localhost 에서만 작동해요. 주소창이 http://localhost:... 형식인지 확인해 주세요.';
+            break;
+        case 'NotSupportedError':
+            text = '이 브라우저는 카메라 API를 지원하지 않아요. 최신 Chrome / Edge / Firefox 를 사용해 주세요.';
+            break;
+        default:
+            text = `카메라를 시작하지 못했어요 (${name || '알 수 없는 오류'}). 다시 시도해 주세요.`;
     }
+    msg.textContent = text;
     box.hidden = false;
 }
 
