@@ -89,10 +89,21 @@
     <!-- 포토부스 화면 -->
     <section id="photobooth" class="screen">
         <div class="pb-stage" id="pbStage">
-            <video id="cameraVideo" autoplay playsinline muted></video>
+            <video id="cameraVideo" autoplay playsinline muted webkit-playsinline></video>
             <canvas id="frameCanvas" aria-hidden="true"></canvas>
             <div class="pb-flash" id="pbFlash" aria-hidden="true"></div>
             <div class="pb-countdown" id="pbCountdown" aria-hidden="true"></div>
+
+            <!-- iOS 오토플레이 차단 시 노출 -->
+            <div class="pb-play-gate" id="pbPlayGate" hidden>
+                <div class="pb-play-gate-inner">
+                    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <polygon points="5 3 19 12 5 21 5 3" fill="currentColor"></polygon>
+                    </svg>
+                    <h3>탭해서 카메라 시작</h3>
+                    <p>아이패드에서는 화면을 한 번 탭해 카메라를 켜야 해요</p>
+                </div>
+            </div>
 
             <div class="pb-top">
                 <button class="btn-home pb-home" onclick="exitPhotoBooth()" aria-label="홈으로 돌아가기">

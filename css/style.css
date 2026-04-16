@@ -633,6 +633,11 @@ body {
     overflow: hidden;
 }
 
+/* hidden 속성이 display: flex 등을 무조건 이기도록 */
+[hidden] {
+    display: none !important;
+}
+
 .pb-stage {
     position: relative;
     width: 100%;
@@ -825,6 +830,58 @@ body {
     0% { opacity: 0; }
     15% { opacity: 0.9; }
     100% { opacity: 0; }
+}
+
+/* --- 오토플레이 게이트 (iOS 탭 유도) --- */
+.pb-play-gate {
+    position: absolute;
+    inset: 0;
+    z-index: 25;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.75);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    cursor: pointer;
+    animation: fadeIn 0.25s var(--ease-out);
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; }
+}
+
+.pb-play-gate-inner {
+    text-align: center;
+    color: #ffffff;
+    padding: 32px 24px;
+    max-width: 320px;
+    pointer-events: none;
+}
+
+.pb-play-gate-inner svg {
+    color: var(--primary);
+    margin-bottom: 16px;
+    animation: pulsePlay 2s ease-in-out infinite;
+}
+
+@keyframes pulsePlay {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.08); }
+}
+
+.pb-play-gate-inner h3 {
+    font-size: 20px;
+    font-weight: 700;
+    margin-bottom: 8px;
+    letter-spacing: -0.01em;
+}
+
+.pb-play-gate-inner p {
+    font-size: 14px;
+    font-weight: 400;
+    opacity: 0.8;
+    line-height: 1.6;
 }
 
 /* --- 에러 --- */

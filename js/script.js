@@ -466,8 +466,8 @@ async function initPhotoBooth() {
         }
         pb.video.srcObject = pb.stream;
 
-        // iOS Safari는 play()가 반드시 호출돼야 영상이 렌더됨
-        try { await pb.video.play(); } catch (_) { /* autoplay 차단 시 조용히 넘김 */ }
+        // iOS Safari 오토플레이 감지 — play()가 거부되거나 영상이 안 뜨면 탭 유도
+        await startVideoPlayback();
 
         // 2. 그 다음 프레임 이미지 로드 + 그린스크린 처리
         if (!pb.frameImg) {
@@ -480,6 +480,46 @@ async function initPhotoBooth() {
         console.error('[photobooth] camera error:', err);
         showPbError(err);
     }
+}
+
+// 비디오 재생을 시작하고, 막힐 경우 "탭해서 시작" 게이트를 노출
+async function startVideoPlayback() {
+    hidePlayGate();
+    try {
+        await pb.video.play();
+    } catch (err) {
+        // NotAllowedError (iOS autoplay 차단) 등 — 유저 탭 대기
+        console.warn('[photobooth] autoplay blocked:', err && err.name);
+        showPlayGate();
+        return;
+    }
+    // play()는 성공했지만 실제로 프레임이 올라오는지 2초 감시 (iOS가 가끔 조용히 멈춤)
+    setTimeout(() => {
+        if (pb.video && pb.video.readyState < 2) {
+            showPlayGate();
+        }
+    }, 2000);
+}
+
+function showPlayGate() {
+    const gate = document.getElementById('pbPlayGate');
+    if (!gate) return;
+    gate.hidden = false;
+    gate.onclick = async () => {
+        try {
+            await pb.video.play();
+            hidePlayGate();
+        } catch (err) {
+            console.error('[photobooth] manual play failed:', err);
+        }
+    };
+}
+
+function hidePlayGate() {
+    const gate = document.getElementById('pbPlayGate');
+    if (!gate) return;
+    gate.hidden = true;
+    gate.onclick = null;
 }
 
 // 여러 제약 조건을 순차적으로 시도해서 가장 호환되는 카메라 스트림을 획득
