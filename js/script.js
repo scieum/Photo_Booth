@@ -410,9 +410,12 @@ function retryQuiz() {
 
 const pb = {
     stream: null,
-    frameImg: null,         // 원본 photo.png
-    frameKeyedCanvas: null, // 그린스크린 처리된 프레임 (overlay 용)
-    photos: [],             // 촬영한 4장 (dataURL)
+    frameImg: null,           // 원본 photo.png (촬영 중 라이브 프레임)
+    frameKeyedCanvas: null,   // 그린스크린 처리된 라이브 프레임
+    stickerImg: null,         // 원본 sticker.png (최종 4컷 프레임)
+    stickerKeyedCanvas: null, // 그린스크린 처리된 스티커 프레임
+    stickerSlots: null,       // 자동 감지된 4개 슬롯 좌표
+    photos: [],               // 촬영한 4장 (dataURL)
     isShooting: false,
     video: null,
     frameCanvas: null
@@ -647,6 +650,11 @@ function loadImage(src) {
     });
 }
 
+// 초록 픽셀 판별 (#00FF00 ~ 약간 어두운 초록까지 포괄)
+function isGreenPixel(r, g, b) {
+    return g > 130 && g - r > 60 && g - b > 60;
+}
+
 // 초록 픽셀을 투명하게 치환 (그린스크린)
 function chromaKeyGreen(img) {
     const canvas = document.createElement('canvas');
@@ -659,16 +667,91 @@ function chromaKeyGreen(img) {
     const data = imageData.data;
 
     for (let i = 0; i < data.length; i += 4) {
-        const r = data[i];
-        const g = data[i + 1];
-        const b = data[i + 2];
-        // 초록 픽셀 판별: G가 월등히 높고 R/B는 낮음
-        if (g > 160 && r < 120 && b < 120 && g - r > 50 && g - b > 50) {
-            data[i + 3] = 0; // alpha 0
+        if (isGreenPixel(data[i], data[i + 1], data[i + 2])) {
+            data[i + 3] = 0;
         }
     }
     ctx.putImageData(imageData, 0, 0);
     return canvas;
+}
+
+// sticker.png 안의 초록 사각형 슬롯들을 자동 감지 (위→아래 순서)
+function detectGreenSlots(img) {
+    const w = img.naturalWidth;
+    const h = img.naturalHeight;
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(img, 0, 0);
+    const data = ctx.getImageData(0, 0, w, h).data;
+
+    // 1) 각 행의 초록 픽셀 개수 → Y축 밴드 검출
+    const rowGreen = new Uint32Array(h);
+    for (let y = 0; y < h; y++) {
+        let count = 0;
+        const rowStart = y * w * 4;
+        for (let x = 0; x < w; x++) {
+            const i = rowStart + x * 4;
+            if (isGreenPixel(data[i], data[i + 1], data[i + 2])) count++;
+        }
+        rowGreen[y] = count;
+    }
+
+    // 2) 행 임계치 이상 연속된 구간 = 슬롯 후보 밴드
+    const minRowGreen = w * 0.20; // 폭의 20% 이상 초록이면 슬롯 행
+    const minBandHeight = h * 0.05; // 슬롯 최소 높이 (전체 5%)
+    const bands = [];
+    let bandStart = -1;
+    for (let y = 0; y < h; y++) {
+        if (rowGreen[y] >= minRowGreen) {
+            if (bandStart === -1) bandStart = y;
+        } else if (bandStart !== -1) {
+            if (y - bandStart >= minBandHeight) bands.push({ y0: bandStart, y1: y - 1 });
+            bandStart = -1;
+        }
+    }
+    if (bandStart !== -1 && h - bandStart >= minBandHeight) {
+        bands.push({ y0: bandStart, y1: h - 1 });
+    }
+
+    // 3) 각 밴드의 좌우 경계 = 그 밴드 안의 초록 픽셀 X 최솟값/최댓값
+    return bands.map(band => {
+        let minX = w, maxX = 0;
+        for (let y = band.y0; y <= band.y1; y++) {
+            const rowStart = y * w * 4;
+            for (let x = 0; x < w; x++) {
+                const i = rowStart + x * 4;
+                if (isGreenPixel(data[i], data[i + 1], data[i + 2])) {
+                    if (x < minX) minX = x;
+                    if (x > maxX) maxX = x;
+                }
+            }
+        }
+        return {
+            x: minX,
+            y: band.y0,
+            w: maxX - minX + 1,
+            h: band.y1 - band.y0 + 1
+        };
+    });
+}
+
+// 슬롯에 이미지를 cover-fit (가운데 크롭, 잘리는 부분은 슬롯 밖으로 나가지 않게 clip)
+function drawImageCover(ctx, img, dx, dy, dw, dh) {
+    const iw = img.width;
+    const ih = img.height;
+    const scale = Math.max(dw / iw, dh / ih);
+    const drawW = iw * scale;
+    const drawH = ih * scale;
+    const offX = dx + (dw - drawW) / 2;
+    const offY = dy + (dh - drawH) / 2;
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(dx, dy, dw, dh);
+    ctx.clip();
+    ctx.drawImage(img, offX, offY, drawW, drawH);
+    ctx.restore();
 }
 
 function renderFrameOverlay() {
@@ -740,85 +823,62 @@ function flash() {
     el.classList.add('active');
 }
 
-// 현재 프레임을 캡처 (카메라 미러링 + 프레임 합성)
+// 현재 카메라 프레임을 캡처 (좌우반전, 프레임 오버레이 없이 raw 저장)
+// 최종 스티커에서 사각형 슬롯에 깔끔하게 배치되려면 raw 영상이 필요함
 function captureFrame() {
-    const frameW = pb.frameKeyedCanvas.width;
-    const frameH = pb.frameKeyedCanvas.height;
-    const canvas = document.createElement('canvas');
-    canvas.width = frameW;
-    canvas.height = frameH;
-    const ctx = canvas.getContext('2d');
-
-    // 1. 카메라 프레임을 cover 방식으로 그리기 (좌우반전)
     const vw = pb.video.videoWidth;
     const vh = pb.video.videoHeight;
-    const scale = Math.max(frameW / vw, frameH / vh);
-    const drawW = vw * scale;
-    const drawH = vh * scale;
-    const dx = (frameW - drawW) / 2;
-    const dy = (frameH - drawH) / 2;
+    const canvas = document.createElement('canvas');
+    canvas.width = vw;
+    canvas.height = vh;
+    const ctx = canvas.getContext('2d');
 
+    // 좌우반전해서 그리기 (사용자가 본 것과 동일하게)
     ctx.save();
-    ctx.translate(frameW, 0);
+    ctx.translate(vw, 0);
     ctx.scale(-1, 1);
-    // 좌우반전 된 좌표계에서 그릴 때는 x 좌표를 뒤집어야 함
-    ctx.drawImage(pb.video, frameW - dx - drawW, dy, drawW, drawH);
+    ctx.drawImage(pb.video, 0, 0, vw, vh);
     ctx.restore();
-
-    // 2. 프레임 오버레이 (그린 투명화된 상태)
-    ctx.drawImage(pb.frameKeyedCanvas, 0, 0);
 
     return canvas.toDataURL('image/png');
 }
 
-// --- 스티커 생성 ---
+// --- 스티커 생성 (sticker.png 프레임의 4개 초록 슬롯에 사진 배치) ---
 async function buildSticker() {
-    const frameW = pb.frameKeyedCanvas.width;
-    const frameH = pb.frameKeyedCanvas.height;
-    const padding = 24;
-    const gap = 16;
-    const headerH = 70;
-    const footerH = 80;
+    // sticker.png 로드 + 슬롯 좌표 + 크로마키 캐시
+    if (!pb.stickerImg) {
+        pb.stickerImg = await loadImage('image/sticker.png');
+        pb.stickerSlots = detectGreenSlots(pb.stickerImg);
+        pb.stickerKeyedCanvas = chromaKeyGreen(pb.stickerImg);
+        dbg('sticker', `${pb.stickerImg.naturalWidth}x${pb.stickerImg.naturalHeight}, slots=${pb.stickerSlots.length}`);
+        pb.stickerSlots.forEach((s, i) => dbg(`slot${i}`, `${s.x},${s.y} ${s.w}x${s.h}`));
+    }
 
-    const stickerW = frameW + padding * 2;
-    const stickerH = headerH + (frameH * PHOTO_COUNT) + (gap * (PHOTO_COUNT - 1)) + footerH + padding;
+    const stickerW = pb.stickerImg.naturalWidth;
+    const stickerH = pb.stickerImg.naturalHeight;
+    const slots = pb.stickerSlots;
 
     const canvas = document.getElementById('stickerCanvas');
     canvas.width = stickerW;
     canvas.height = stickerH;
     const ctx = canvas.getContext('2d');
 
-    // 배경
+    // 배경 (혹시 PNG가 투명한 부분이 있을 경우 대비)
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(0, 0, stickerW, stickerH);
 
-    // 헤더
-    ctx.fillStyle = '#1a1c20';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.font = '700 28px "Pretendard Variable", Pretendard, sans-serif';
-    ctx.fillText('과학의 날 포토부스', stickerW / 2, 36);
-    ctx.font = '400 14px "Pretendard Variable", Pretendard, sans-serif';
-    ctx.fillStyle = '#868b94';
-    const today = new Date();
-    const dateStr = `${today.getFullYear()}. ${String(today.getMonth() + 1).padStart(2, '0')}. ${String(today.getDate()).padStart(2, '0')}`;
-    ctx.fillText(dateStr, stickerW / 2, 58);
-
-    // 사진 4장
+    // 1) 사진 4장 로드
     const images = await Promise.all(pb.photos.map(loadImage));
+
+    // 2) 각 슬롯에 사진 cover-fit 배치 (1번 슬롯 → 1번 사진 …)
     images.forEach((img, i) => {
-        const y = headerH + i * (frameH + gap);
-        ctx.drawImage(img, padding, y, frameW, frameH);
+        const slot = slots[i];
+        if (!slot) return; // 슬롯 부족 시 스킵
+        drawImageCover(ctx, img, slot.x, slot.y, slot.w, slot.h);
     });
 
-    // 푸터
-    const footerY = headerH + images.length * (frameH + gap) + 8;
-    ctx.fillStyle = '#06b6d4';
-    ctx.font = '700 18px "Pretendard Variable", Pretendard, sans-serif';
-    ctx.fillText('Science Day Photo Booth', stickerW / 2, footerY + 24);
-    ctx.fillStyle = '#b0b3ba';
-    ctx.font = '400 12px "Pretendard Variable", Pretendard, sans-serif';
-    ctx.fillText('made with love', stickerW / 2, footerY + 48);
+    // 3) 그린 키된 sticker.png 오버레이 (장식이 사진 위에 덮임)
+    ctx.drawImage(pb.stickerKeyedCanvas, 0, 0);
 }
 
 // --- 다운로드 / 재촬영 ---
