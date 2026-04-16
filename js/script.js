@@ -434,6 +434,22 @@ function detectIOSNonSafariBrowser() {
     return null;
 }
 
+// --- 디버그 로그 (아이패드 원격 진단용) ---
+function dbg(label, value) {
+    const el = document.getElementById('pbDebugLog');
+    if (!el) return;
+    const line = `[${new Date().toISOString().slice(11, 19)}] ${label}: ${typeof value === 'object' ? JSON.stringify(value) : value}`;
+    el.textContent = (el.textContent + '\n' + line).trim();
+}
+
+function enableDebugIfRequested() {
+    const qs = new URLSearchParams(location.search);
+    if (qs.has('debug')) {
+        const panel = document.getElementById('pbDebug');
+        if (panel) panel.hidden = false;
+    }
+}
+
 // --- 초기화 ---
 async function initPhotoBooth() {
     pb.video = document.getElementById('cameraVideo');
@@ -441,6 +457,13 @@ async function initPhotoBooth() {
 
     resetPhotoBooth();
     hidePbError();
+    enableDebugIfRequested();
+
+    dbg('UA', navigator.userAgent);
+    dbg('secureCtx', window.isSecureContext);
+    dbg('hasMedia', !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia));
+    dbg('platform', navigator.platform);
+    dbg('maxTouch', navigator.maxTouchPoints);
 
     // 사전 점검: iOS 비-Safari 브라우저
     const iosBrowser = detectIOSNonSafariBrowser();
@@ -462,9 +485,12 @@ async function initPhotoBooth() {
     try {
         // 1. 웹캠 먼저 시작 — iOS Safari는 사용자 제스처 바로 뒤에 getUserMedia 호출해야 함
         if (!pb.stream) {
+            dbg('getUserMedia', 'calling...');
             pb.stream = await requestCamera();
+            dbg('stream', 'got stream: ' + pb.stream.getVideoTracks().length + ' tracks');
         }
         pb.video.srcObject = pb.stream;
+        dbg('srcObject', 'set');
 
         // iOS Safari 오토플레이 감지 — play()가 거부되거나 영상이 안 뜨면 탭 유도
         await startVideoPlayback();
@@ -473,11 +499,13 @@ async function initPhotoBooth() {
         if (!pb.frameImg) {
             pb.frameImg = await loadImage('image/photo.png');
             pb.frameKeyedCanvas = chromaKeyGreen(pb.frameImg);
+            dbg('frame', pb.frameKeyedCanvas.width + 'x' + pb.frameKeyedCanvas.height);
         }
         renderFrameOverlay();
 
     } catch (err) {
         console.error('[photobooth] camera error:', err);
+        dbg('ERROR', (err && err.name) + ': ' + (err && err.message));
         showPbError(err);
     }
 }
@@ -487,14 +515,19 @@ async function startVideoPlayback() {
     hidePlayGate();
     try {
         await pb.video.play();
+        dbg('play()', 'success');
     } catch (err) {
-        // NotAllowedError (iOS autoplay 차단) 등 — 유저 탭 대기
         console.warn('[photobooth] autoplay blocked:', err && err.name);
+        dbg('play()', 'blocked: ' + (err && err.name));
         showPlayGate();
         return;
     }
     // play()는 성공했지만 실제로 프레임이 올라오는지 2초 감시 (iOS가 가끔 조용히 멈춤)
     setTimeout(() => {
+        const rs = pb.video ? pb.video.readyState : -1;
+        const vw = pb.video ? pb.video.videoWidth : 0;
+        const vh = pb.video ? pb.video.videoHeight : 0;
+        dbg('video@2s', `readyState=${rs} size=${vw}x${vh}`);
         if (pb.video && pb.video.readyState < 2) {
             showPlayGate();
         }

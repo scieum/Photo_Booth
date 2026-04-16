@@ -125,6 +125,15 @@
                 </button>
             </div>
 
+            <!-- 디버그 패널 (?debug 쿼리로 활성화) -->
+            <div class="pb-debug" id="pbDebug" hidden>
+                <div class="pb-debug-header">
+                    <strong>DEBUG</strong>
+                    <button type="button" onclick="document.getElementById('pbDebug').hidden = true">×</button>
+                </div>
+                <pre id="pbDebugLog"></pre>
+            </div>
+
             <div class="pb-error" id="pbError" hidden>
                 <h3>카메라를 사용할 수 없어요</h3>
                 <p id="pbErrorMsg">브라우저에서 카메라 권한을 허용해주세요.</p>
