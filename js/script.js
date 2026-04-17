@@ -487,10 +487,14 @@ async function calculateResult() {
 // ===== 네비게이션 =====
 // 매칭된 과학자별로 사용 가능한 "과학자와 함께" 스티커
 const SCIENTIST_STICKERS = {
-    curie: 'image/Curie sticker.png',
     einstein: 'image/Einstein sticker.png',
-    feynman: 'image/Feynman sticker.png'
-    // 다른 과학자 스티커가 추가되면 여기 매핑 추가
+    curie: 'image/Curie sticker.png',
+    newton: 'image/Newton sticker.png',
+    darwin: 'image/Darwin sticker.png',
+    tesla: 'image/Tesla sticker.png',
+    feynman: 'image/Feynman sticker.png',
+    edison: 'image/Edison sticker.png',
+    pasteur: 'image/Pasteur sticker.png'
 };
 const SCIENCE_DAY_STICKER = 'image/sticker.png';
 
