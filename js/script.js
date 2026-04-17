@@ -143,31 +143,6 @@ const questions = [
         ]
     },
     {
-        text: "어려운 문제를 만났을 때 나는?",
-        options: [
-            {
-                label: "A",
-                text: "포기하지 않고 끝까지 파고든다",
-                scores: { curie: 3, newton: 2 }
-            },
-            {
-                label: "B",
-                text: "완전히 다른 방향에서 생각해본다",
-                scores: { einstein: 3, tesla: 2 }
-            },
-            {
-                label: "C",
-                text: "관련 자료를 모으고 꼼꼼히 분석한다",
-                scores: { darwin: 3, pasteur: 2, newton: 1 }
-            },
-            {
-                label: "D",
-                text: "친구나 선생님과 같이 의논하며 풀어본다",
-                scores: { feynman: 3, edison: 2 }
-            }
-        ]
-    },
-    {
         text: "내가 과학자가 된다면 하고 싶은 일은?",
         options: [
             {
@@ -214,6 +189,106 @@ const questions = [
                 label: "D",
                 text: "세계 과학 축제 — 과학자들과 만나는 곳",
                 scores: { feynman: 3, edison: 1, pasteur: 1 }
+            }
+        ]
+    },
+    {
+        text: "노트나 스케치북을 펼쳤을 때 나는...",
+        options: [
+            {
+                label: "A",
+                text: "수식과 도식으로 빼곡하게 정리한다",
+                scores: { newton: 3, einstein: 2, curie: 1 }
+            },
+            {
+                label: "B",
+                text: "관찰한 것을 그림과 주석으로 기록한다",
+                scores: { darwin: 3, pasteur: 2 }
+            },
+            {
+                label: "C",
+                text: "머릿속 아이디어를 설계도처럼 그린다",
+                scores: { tesla: 3, edison: 2 }
+            },
+            {
+                label: "D",
+                text: "낙서 같지만 재밌는 예시와 비유가 많다",
+                scores: { feynman: 3, einstein: 1 }
+            }
+        ]
+    },
+    {
+        text: "팀 프로젝트에서 내 포지션은?",
+        options: [
+            {
+                label: "A",
+                text: "혼자 깊이 파고드는 스페셜리스트",
+                scores: { newton: 3, curie: 2, einstein: 1 }
+            },
+            {
+                label: "B",
+                text: "팀원들과 아이디어를 나누는 커넥터",
+                scores: { feynman: 3, edison: 2, pasteur: 1 }
+            },
+            {
+                label: "C",
+                text: "실제로 구현하고 만드는 실행가",
+                scores: { edison: 3, tesla: 2 }
+            },
+            {
+                label: "D",
+                text: "자료를 모으고 정리하는 신중한 분석가",
+                scores: { darwin: 3, pasteur: 2, newton: 1 }
+            }
+        ]
+    },
+    {
+        text: "실패한 실험 앞에서 내 반응은?",
+        options: [
+            {
+                label: "A",
+                text: "\"한 번 더.\" 같은 방법을 집요하게 다시 시도",
+                scores: { curie: 3, edison: 2 }
+            },
+            {
+                label: "B",
+                text: "왜 실패했는지 원리부터 되짚어본다",
+                scores: { newton: 3, einstein: 2 }
+            },
+            {
+                label: "C",
+                text: "아예 다른 관점으로 접근을 갈아엎는다",
+                scores: { einstein: 2, tesla: 3, feynman: 1 }
+            },
+            {
+                label: "D",
+                text: "사람들에게 조언을 구하고 같이 고민한다",
+                scores: { feynman: 2, edison: 2, pasteur: 2 }
+            }
+        ]
+    },
+    {
+        text: "세상에서 가장 멋있다고 느껴지는 순간은?",
+        options: [
+            {
+                label: "A",
+                text: "아무도 풀지 못한 난제의 실마리를 발견했을 때",
+                scores: { newton: 3, einstein: 2, curie: 1 }
+            },
+            {
+                label: "B",
+                text: "자연 현상에서 숨겨진 규칙을 찾아냈을 때",
+                scores: { darwin: 3, einstein: 1 }
+            },
+            {
+                label: "C",
+                text: "내가 만든 것이 누군가의 삶을 편하게 했을 때",
+                scores: { edison: 3, tesla: 2, pasteur: 2 }
+            },
+            {
+                label: "D",
+                text: "어려운 과학을 친구에게 쉽게 설명해줬을 때",
+                scores: { feynman: 3, pasteur: 1 }
             }
         ]
     }
@@ -279,6 +354,8 @@ function renderQuestion() {
     const progress = ((currentQuestion) / questions.length) * 100;
     document.getElementById('progressFill').style.width = progress + '%';
     document.getElementById('currentQ').textContent = currentQuestion + 1;
+    const totalEl = document.getElementById('totalQ');
+    if (totalEl) totalEl.textContent = questions.length;
 
     // 애니메이션을 위해 잠시 숨김
     area.style.opacity = '0';
