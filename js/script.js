@@ -408,7 +408,67 @@ async function calculateResult() {
 }
 
 // ===== 네비게이션 =====
+// 매칭된 과학자별로 사용 가능한 "과학자와 함께" 스티커
+const SCIENTIST_STICKERS = {
+    curie: 'image/Curie sticker.png'
+    // 다른 과학자 스티커가 추가되면 여기 매핑 추가
+};
+const SCIENCE_DAY_STICKER = 'image/sticker.png';
+
+function goToFrameChoice() {
+    // 매칭된 과학자에 해당하는 스티커가 있는지에 따라 UI 갱신
+    const scientistBtn = document.getElementById('choiceScientist');
+    const scientistImg = document.getElementById('choiceScientistImg');
+    const scientistDesc = document.getElementById('choiceScientistDesc');
+    const scientistBadge = document.getElementById('choiceScientistBadge');
+
+    const sticker = SCIENTIST_STICKERS[matchedScientist];
+    const s = scientists[matchedScientist];
+
+    if (sticker && s) {
+        scientistImg.src = sticker;
+        scientistImg.alt = `${s.name}와 함께`;
+        scientistDesc.textContent = `${s.name}와 함께 찰칵`;
+        scientistBtn.removeAttribute('aria-disabled');
+        scientistBtn.disabled = false;
+        scientistBadge.hidden = true;
+    } else {
+        // 아직 준비되지 않은 과학자 스티커 → 비활성화
+        scientistImg.src = s && s.image ? s.image : '';
+        scientistImg.alt = '';
+        scientistDesc.textContent = '이 과학자 프레임은 준비 중이에요';
+        scientistBtn.setAttribute('aria-disabled', 'true');
+        scientistBtn.disabled = true;
+        scientistBadge.hidden = false;
+    }
+
+    showScreen('frameChoice');
+}
+
+function chooseFrame(type) {
+    let stickerSrc;
+    if (type === 'scientist') {
+        stickerSrc = SCIENTIST_STICKERS[matchedScientist];
+        if (!stickerSrc) {
+            // fallback: 준비되지 않은 경우 과학의 날 프레임으로
+            stickerSrc = SCIENCE_DAY_STICKER;
+            type = 'scienceDay';
+        }
+    } else {
+        stickerSrc = SCIENCE_DAY_STICKER;
+    }
+
+    pb.chosenFrameType = type;
+    pb.chosenFrameSrc = stickerSrc;
+
+    showScreen('photobooth');
+    initPhotoBooth();
+}
+
 function goToPhotoBooth() {
+    // 하위 호환 - 프레임 선택 없이 바로 이동 시 과학의 날 프레임 기본
+    pb.chosenFrameType = 'scienceDay';
+    pb.chosenFrameSrc = SCIENCE_DAY_STICKER;
     showScreen('photobooth');
     initPhotoBooth();
 }
@@ -430,15 +490,18 @@ function retryQuiz() {
 
 const pb = {
     stream: null,
-    frameImg: null,           // 원본 photo.png (촬영 중 라이브 프레임)
-    frameKeyedCanvas: null,   // 그린스크린 처리된 라이브 프레임
-    stickerImg: null,         // 원본 sticker.png (최종 4컷 프레임)
-    stickerKeyedCanvas: null, // 그린스크린 처리된 스티커 프레임
-    stickerSlots: null,       // 자동 감지된 4개 슬롯 좌표
-    photos: [],               // 촬영한 4장 (dataURL)
+    chosenFrameType: 'scienceDay',           // 'scientist' | 'scienceDay'
+    chosenFrameSrc: 'image/sticker.png',     // 선택된 스티커 이미지 경로
+    stickerImg: null,                        // 선택된 스티커 원본
+    stickerKeyedCanvas: null,                // 그린스크린 처리된 스티커
+    stickerSlots: null,                      // 자동 감지된 4개 슬롯 좌표
+    stickerCacheSrc: null,                   // 캐시된 스티커의 src (갱신 판단용)
+    photos: [],                              // 촬영한 4장 (dataURL)
+    photoImgs: [],                           // 촬영한 사진을 HTMLImageElement 로 캐시
     isShooting: false,
     video: null,
-    frameCanvas: null
+    frameCanvas: null,
+    renderRafId: null                        // 렌더 루프 RAF id
 };
 
 const PHOTO_COUNT = 4;
@@ -487,6 +550,8 @@ async function initPhotoBooth() {
     dbg('hasMedia', !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia));
     dbg('platform', navigator.platform);
     dbg('maxTouch', navigator.maxTouchPoints);
+    dbg('frameType', pb.chosenFrameType);
+    dbg('frameSrc', pb.chosenFrameSrc);
 
     // 사전 점검: iOS 비-Safari 브라우저
     const iosBrowser = detectIOSNonSafariBrowser();
@@ -515,21 +580,39 @@ async function initPhotoBooth() {
         pb.video.srcObject = pb.stream;
         dbg('srcObject', 'set');
 
-        // iOS Safari 오토플레이 감지 — play()가 거부되거나 영상이 안 뜨면 탭 유도
+        // iOS Safari 오토플레이 감지
         await startVideoPlayback();
 
-        // 2. 그 다음 프레임 이미지 로드 + 그린스크린 처리
-        if (!pb.frameImg) {
-            pb.frameImg = await loadImage('image/photo.png');
-            pb.frameKeyedCanvas = chromaKeyGreen(pb.frameImg);
-            dbg('frame', pb.frameKeyedCanvas.width + 'x' + pb.frameKeyedCanvas.height);
-        }
-        renderFrameOverlay();
+        // 2. 선택된 스티커 로드 + 슬롯 감지 + 그린스크린 처리
+        await ensureStickerLoaded(pb.chosenFrameSrc);
+
+        // 3. 렌더 루프 시작 (단일 canvas 에 카메라 + 촬영된 사진 + 스티커 합성)
+        startRenderLoop();
+        updateSlotIndicator();
 
     } catch (err) {
         console.error('[photobooth] camera error:', err);
         dbg('ERROR', (err && err.name) + ': ' + (err && err.message));
         showPbError(err);
+    }
+}
+
+// 스티커 이미지를 로드하고 슬롯 감지 + 크로마키 처리 (같은 src 는 캐시)
+async function ensureStickerLoaded(src) {
+    if (pb.stickerCacheSrc === src && pb.stickerImg && pb.stickerSlots) return;
+
+    pb.stickerImg = await loadImage(src);
+    pb.stickerSlots = detectGreenSlots(pb.stickerImg);
+    pb.stickerKeyedCanvas = chromaKeyGreen(pb.stickerImg);
+    pb.stickerCacheSrc = src;
+
+    dbg('sticker', `${pb.stickerImg.naturalWidth}x${pb.stickerImg.naturalHeight}, slots=${pb.stickerSlots.length}`);
+    pb.stickerSlots.forEach((s, i) => dbg(`slot${i}`, `${s.x},${s.y} ${s.w}x${s.h}`));
+
+    // 캔버스 크기를 스티커 원본 크기로 맞춤 (CSS 로 contain 스케일)
+    if (pb.frameCanvas) {
+        pb.frameCanvas.width = pb.stickerImg.naturalWidth;
+        pb.frameCanvas.height = pb.stickerImg.naturalHeight;
     }
 }
 
@@ -604,6 +687,7 @@ async function requestCamera() {
 
 function resetPhotoBooth() {
     pb.photos = [];
+    pb.photoImgs = [];
     pb.isShooting = false;
     updatePhotoCount();
     updateHint('버튼을 누르면 3초 후 촬영됩니다');
@@ -831,12 +915,113 @@ function drawImageCover(ctx, img, dx, dy, dw, dh) {
     ctx.restore();
 }
 
-function renderFrameOverlay() {
-    const target = pb.frameCanvas;
-    target.width = pb.frameKeyedCanvas.width;
-    target.height = pb.frameKeyedCanvas.height;
-    target.getContext('2d').drawImage(pb.frameKeyedCanvas, 0, 0);
+// 비디오를 슬롯에 cover-fit 으로 그리기 (좌우반전 포함)
+function drawVideoMirroredCover(ctx, video, dx, dy, dw, dh) {
+    const iw = video.videoWidth;
+    const ih = video.videoHeight;
+    if (!iw || !ih) return;
+    const scale = Math.max(dw / iw, dh / ih);
+    const drawW = iw * scale;
+    const drawH = ih * scale;
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(dx, dy, dw, dh);
+    ctx.clip();
+    // 미러링: 슬롯 영역 내에서 좌우반전
+    ctx.translate(dx + dw, dy);
+    ctx.scale(-1, 1);
+    const offX = (dw - drawW) / 2;
+    const offY = (dh - drawH) / 2;
+    ctx.drawImage(video, offX, offY, drawW, drawH);
+    ctx.restore();
 }
+
+// 단일 렌더 루프: 배경 + 촬영된 사진 + 현재 슬롯 라이브 비디오 + 스티커 오버레이
+function startRenderLoop() {
+    stopRenderLoop();
+    const ctx = pb.frameCanvas.getContext('2d');
+
+    function frame() {
+        if (!pb.stickerKeyedCanvas) return;
+        const W = pb.frameCanvas.width;
+        const H = pb.frameCanvas.height;
+
+        // 배경 (스티커의 투명 부분이 노출될 때 흰색으로 보이게)
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, W, H);
+
+        const slots = pb.stickerSlots || [];
+
+        // 촬영된 사진을 해당 슬롯에 그림
+        for (let i = 0; i < slots.length && i < pb.photoImgs.length; i++) {
+            const img = pb.photoImgs[i];
+            if (!img) continue;
+            const s = slots[i];
+            drawImageCover(ctx, img, s.x, s.y, s.w, s.h);
+        }
+
+        // 현재 촬영 중인 슬롯에는 라이브 비디오를 보여줌
+        const currentIdx = pb.photos.length;
+        if (currentIdx < slots.length && pb.video && pb.video.readyState >= 2) {
+            const s = slots[currentIdx];
+            drawVideoMirroredCover(ctx, pb.video, s.x, s.y, s.w, s.h);
+        }
+
+        // 그린스크린 처리된 스티커를 위에 덮음 (장식이 사진을 프레이밍)
+        ctx.drawImage(pb.stickerKeyedCanvas, 0, 0);
+
+        pb.renderRafId = requestAnimationFrame(frame);
+    }
+    pb.renderRafId = requestAnimationFrame(frame);
+}
+
+function stopRenderLoop() {
+    if (pb.renderRafId) {
+        cancelAnimationFrame(pb.renderRafId);
+        pb.renderRafId = null;
+    }
+}
+
+// 현재 촬영할 슬롯을 시각적으로 하이라이트 (캔버스 위에 DOM 테두리 배치)
+function updateSlotIndicator() {
+    const el = document.getElementById('pbSlotIndicator');
+    if (!el) return;
+    const slots = pb.stickerSlots;
+    const currentIdx = pb.photos.length;
+
+    if (!slots || currentIdx >= slots.length || !pb.stickerImg) {
+        el.classList.remove('active');
+        return;
+    }
+
+    // 캔버스 원본 좌표 → CSS 렌더링 좌표로 환산
+    const canvas = pb.frameCanvas;
+    const rect = canvas.getBoundingClientRect();
+    const stageRect = document.getElementById('pbStage').getBoundingClientRect();
+    const natW = pb.stickerImg.naturalWidth;
+    const natH = pb.stickerImg.naturalHeight;
+
+    // object-fit: contain 으로 실제 그려지는 영역 계산
+    const scale = Math.min(rect.width / natW, rect.height / natH);
+    const drawnW = natW * scale;
+    const drawnH = natH * scale;
+    const offsetX = rect.left - stageRect.left + (rect.width - drawnW) / 2;
+    const offsetY = rect.top - stageRect.top + (rect.height - drawnH) / 2;
+
+    const s = slots[currentIdx];
+    el.style.left = (offsetX + s.x * scale) + 'px';
+    el.style.top = (offsetY + s.y * scale) + 'px';
+    el.style.width = (s.w * scale) + 'px';
+    el.style.height = (s.h * scale) + 'px';
+    el.classList.add('active');
+}
+
+// 창 크기 변동/스티커 변경 시 인디케이터 위치 갱신
+window.addEventListener('resize', () => {
+    if (document.getElementById('photobooth').classList.contains('active')) {
+        updateSlotIndicator();
+    }
+});
 
 // --- 셔터 ---
 async function takePhoto() {
@@ -857,8 +1042,11 @@ async function takePhoto() {
     // 플래시 + 캡처
     flash();
     const photoUrl = captureFrame();
+    const photoImg = await loadImage(photoUrl);
     pb.photos.push(photoUrl);
+    pb.photoImgs.push(photoImg);
     updatePhotoCount();
+    updateSlotIndicator();
 
     await sleep(600);
 
@@ -920,16 +1108,10 @@ function captureFrame() {
     return canvas.toDataURL('image/png');
 }
 
-// --- 스티커 생성 (sticker.png 프레임의 4개 초록 슬롯에 사진 배치) ---
+// --- 스티커 생성 (선택된 스티커 프레임의 4개 초록 슬롯에 사진 배치) ---
 async function buildSticker() {
-    // sticker.png 로드 + 슬롯 좌표 + 크로마키 캐시
-    if (!pb.stickerImg) {
-        pb.stickerImg = await loadImage('image/sticker.png');
-        pb.stickerSlots = detectGreenSlots(pb.stickerImg);
-        pb.stickerKeyedCanvas = chromaKeyGreen(pb.stickerImg);
-        dbg('sticker', `${pb.stickerImg.naturalWidth}x${pb.stickerImg.naturalHeight}, slots=${pb.stickerSlots.length}`);
-        pb.stickerSlots.forEach((s, i) => dbg(`slot${i}`, `${s.x},${s.y} ${s.w}x${s.h}`));
-    }
+    // 렌더 루프에서 이미 스티커가 로드되어 있지만, 안전하게 한 번 더 보장
+    await ensureStickerLoaded(pb.chosenFrameSrc);
 
     const stickerW = pb.stickerImg.naturalWidth;
     const stickerH = pb.stickerImg.naturalHeight;
@@ -940,21 +1122,23 @@ async function buildSticker() {
     canvas.height = stickerH;
     const ctx = canvas.getContext('2d');
 
-    // 배경 (혹시 PNG가 투명한 부분이 있을 경우 대비)
+    // 배경
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(0, 0, stickerW, stickerH);
 
-    // 1) 사진 4장 로드
-    const images = await Promise.all(pb.photos.map(loadImage));
+    // 촬영된 이미지 사용 (이미 preload 됨)
+    const images = pb.photoImgs.length === pb.photos.length
+        ? pb.photoImgs
+        : await Promise.all(pb.photos.map(loadImage));
 
-    // 2) 각 슬롯에 사진 cover-fit 배치 (1번 슬롯 → 1번 사진 …)
+    // 각 슬롯에 사진 cover-fit 배치 (1번 슬롯 → 1번 사진 …)
     images.forEach((img, i) => {
         const slot = slots[i];
-        if (!slot) return; // 슬롯 부족 시 스킵
+        if (!slot) return;
         drawImageCover(ctx, img, slot.x, slot.y, slot.w, slot.h);
     });
 
-    // 3) 그린 키된 sticker.png 오버레이 (장식이 사진 위에 덮임)
+    // 그린 키된 스티커 오버레이 (장식이 사진 위에 덮임)
     ctx.drawImage(pb.stickerKeyedCanvas, 0, 0);
 }
 
@@ -972,15 +1156,19 @@ function retakePhotos() {
     showScreen('photobooth');
     resetPhotoBooth();
     hidePbError();
-    // 카메라/프레임은 유지
+    // 카메라/프레임은 유지, 렌더 루프는 계속 돌고 있음
+    startRenderLoop();
+    updateSlotIndicator();
 }
 
 function exitPhotoBooth() {
+    stopRenderLoop();
     stopCamera();
     showScreen('intro');
 }
 
 function exitToIntro() {
+    stopRenderLoop();
     stopCamera();
     showScreen('intro');
 }
