@@ -3,6 +3,7 @@ const scientists = {
     einstein: {
         name: "알베르트 아인슈타인",
         nameEn: "Albert Einstein (1879-1955)",
+        image: "image/Einstein.png",
         emoji: "",
         type: "창의적 몽상가",
         quote: "\"상상력은 지식보다 중요하다. 지식은 한계가 있지만, 상상력은 세상 모든 것을 끌어안는다.\"",
@@ -13,6 +14,7 @@ const scientists = {
     curie: {
         name: "마리 퀴리",
         nameEn: "Marie Curie (1867-1934)",
+        image: "image/Curie.png",
         emoji: "",
         type: "끈기의 탐구자",
         quote: "\"인생에서 두려워할 것은 아무것도 없다. 다만 이해해야 할 것이 있을 뿐이다.\"",
@@ -23,6 +25,7 @@ const scientists = {
     newton: {
         name: "아이작 뉴턴",
         nameEn: "Isaac Newton (1643-1727)",
+        image: "image/Newton.png",
         emoji: "",
         type: "논리적 분석가",
         quote: "\"내가 더 멀리 보았다면, 그것은 거인들의 어깨 위에 서 있었기 때문이다.\"",
@@ -33,6 +36,7 @@ const scientists = {
     darwin: {
         name: "찰스 다윈",
         nameEn: "Charles Darwin (1809-1882)",
+        image: "image/Darwin.png",
         emoji: "",
         type: "관찰의 모험가",
         quote: "\"살아남는 종은 가장 강한 종이 아니라, 변화에 가장 잘 적응하는 종이다.\"",
@@ -43,6 +47,7 @@ const scientists = {
     tesla: {
         name: "니콜라 테슬라",
         nameEn: "Nikola Tesla (1856-1943)",
+        image: "image/Tesla.png",
         emoji: "",
         type: "미래를 꿈꾸는 발명가",
         quote: "\"현재는 그들의 것이지만, 내가 위해 일한 미래는 나의 것이다.\"",
@@ -53,6 +58,7 @@ const scientists = {
     feynman: {
         name: "리처드 파인만",
         nameEn: "Richard Feynman (1918-1988)",
+        image: "image/Feynman.png",
         emoji: "",
         type: "즐거운 소통가",
         quote: "\"모르는 것과 함께 사는 것, 그것이야말로 과학이다.\"",
@@ -63,6 +69,7 @@ const scientists = {
     edison: {
         name: "토마스 에디슨",
         nameEn: "Thomas Edison (1847-1931)",
+        image: "image/Edison.png",
         emoji: "",
         type: "실용적 혁신가",
         quote: "\"천재란 1%의 영감과 99%의 노력으로 이루어진다.\"",
@@ -73,6 +80,7 @@ const scientists = {
     pasteur: {
         name: "루이 파스퇴르",
         nameEn: "Louis Pasteur (1822-1895)",
+        image: "image/Pasteur.png",
         emoji: "",
         type: "따뜻한 치유자",
         quote: "\"과학에는 국경이 없다. 지식은 인류의 것이며, 세상을 밝히는 횃불이다.\"",
@@ -356,7 +364,7 @@ function showAnalyzing() {
 }
 
 // ===== 결과 계산 =====
-function calculateResult() {
+async function calculateResult() {
     // 최고 점수 과학자 찾기
     let maxScore = 0;
     let matchKey = 'einstein';
@@ -372,6 +380,18 @@ function calculateResult() {
     const s = scientists[matchKey];
 
     // 결과 렌더링
+    const portrait = document.getElementById('scientistPortrait');
+    if (s.image) {
+        try {
+            portrait.src = await preparePortrait(s.image);
+        } catch (_) {
+            portrait.src = s.image; // 실패 시 원본
+        }
+        portrait.alt = s.name;
+        portrait.hidden = false;
+    } else {
+        portrait.hidden = true;
+    }
     document.getElementById('scientistType').textContent = s.type;
     document.getElementById('scientistName').textContent = s.name;
     document.getElementById('scientistNameEn').textContent = s.nameEn;
@@ -735,6 +755,63 @@ function detectGreenSlots(img) {
             h: band.y1 - band.y0 + 1
         };
     });
+}
+
+// 흰 배경 제거 + 인물 bounding box 크롭 (캐시됨)
+const _portraitCache = {};
+async function preparePortrait(src) {
+    if (_portraitCache[src]) return _portraitCache[src];
+
+    const img = await loadImage(src);
+    const w = img.naturalWidth;
+    const h = img.naturalHeight;
+    const c = document.createElement('canvas');
+    c.width = w;
+    c.height = h;
+    const ctx = c.getContext('2d');
+    ctx.drawImage(img, 0, 0);
+    const imageData = ctx.getImageData(0, 0, w, h);
+    const data = imageData.data;
+
+    // 1) 흰 배경 제거 + bounding box 계산
+    const bgThreshold = 240; // R,G,B 모두 240 이상이면 흰 배경으로 간주
+    let minX = w, minY = h, maxX = 0, maxY = 0;
+    let hasContent = false;
+
+    for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+            const i = (y * w + x) * 4;
+            const r = data[i], g = data[i + 1], b = data[i + 2], a = data[i + 3];
+            const isBg = a === 0 || (r >= bgThreshold && g >= bgThreshold && b >= bgThreshold);
+            if (isBg) {
+                data[i + 3] = 0; // 흰 배경 → 투명
+            } else {
+                hasContent = true;
+                if (x < minX) minX = x;
+                if (x > maxX) maxX = x;
+                if (y < minY) minY = y;
+                if (y > maxY) maxY = y;
+            }
+        }
+    }
+    ctx.putImageData(imageData, 0, 0);
+
+    if (!hasContent) {
+        _portraitCache[src] = src; // 컨텐츠 없으면 원본 그대로
+        return src;
+    }
+
+    // 2) bounding box로 크롭
+    const cw = maxX - minX + 1;
+    const ch = maxY - minY + 1;
+    const cropped = document.createElement('canvas');
+    cropped.width = cw;
+    cropped.height = ch;
+    cropped.getContext('2d').drawImage(c, minX, minY, cw, ch, 0, 0, cw, ch);
+
+    const url = cropped.toDataURL('image/png');
+    _portraitCache[src] = url;
+    return url;
 }
 
 // 슬롯에 이미지를 cover-fit (가운데 크롭, 잘리는 부분은 슬롯 밖으로 나가지 않게 clip)

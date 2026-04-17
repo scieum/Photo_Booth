@@ -468,8 +468,32 @@ body {
     from { opacity: 0; transform: translateY(8px); }
 }
 
-.result-header {
+.result-hero {
+    display: grid;
+    grid-template-columns: 140px 1fr;
+    gap: 16px;
+    align-items: end;
     margin-bottom: 28px;
+}
+
+.scientist-portrait {
+    width: 100%;
+    height: auto;
+    max-height: 220px;
+    object-fit: contain;
+    object-position: center bottom;
+    display: block;
+    filter: drop-shadow(0 6px 14px rgba(0, 0, 0, 0.1));
+    animation: portraitEnter 0.6s var(--ease-spring) both;
+    animation-delay: 100ms;
+}
+
+@keyframes portraitEnter {
+    from { opacity: 0; transform: scale(0.7) translateY(12px); }
+}
+
+.result-header {
+    min-width: 0;
 }
 
 .scientist-type {
@@ -481,12 +505,13 @@ body {
 }
 
 .scientist-name {
-    font-size: 32px;
+    font-size: 26px;
     font-weight: 800;
     color: var(--fg);
-    line-height: 1.25;
+    line-height: 1.2;
     letter-spacing: -0.02em;
     margin-bottom: 6px;
+    word-break: keep-all;
 }
 
 .scientist-name-en {
@@ -1059,8 +1084,13 @@ body {
         padding: 0 20px;
     }
 
+    .result-hero {
+        grid-template-columns: 110px 1fr;
+        gap: 12px;
+    }
+
     .scientist-name {
-        font-size: 26px;
+        font-size: 22px;
     }
 
     .scientist-quote {
