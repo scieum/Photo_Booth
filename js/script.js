@@ -1102,7 +1102,6 @@ async function takePhoto() {
     pb.photos.push(photoUrl);
     pb.photoImgs.push(photoImg);
     updatePhotoCount();
-    updateSlotIndicator();
 
     await sleep(600);
 
@@ -1261,7 +1260,6 @@ function retakePhotos() {
     hidePbError();
     // 카메라/프레임은 유지, 렌더 루프는 계속 돌고 있음
     startRenderLoop();
-    updateSlotIndicator();
 }
 
 function exitPhotoBooth() {
